@@ -1,0 +1,17 @@
+# --- Ansible ---
+*.retry
+*.log
+# Секреты Ansible Vault (если будешь хранить их в файлах)
+.vault_password
+
+# --- Docker ---
+.env
+*.db
+*.sqlite
+
+# --- Системные файлы и IDE ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
