@@ -14,9 +14,57 @@
   timezone:
     name: Asia/Yakutsk
 
+- name: Добавление нового имени хоста в локальный /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: "127.0.1.1 {{ configured_hostname }}"
+
 - name: Настройка безпарольного sudo для appuser
   copy:
     content: "appuser ALL=(ALL) NOPASSWD:ALL"
     dest: /etc/sudoers.d/appuser
     mode: '0440'
     validate: /usr/sbin/visudo -cf %s     
+
+- name: Определение к пути nologin shell для Debian - family
+  set_fact:
+    nologin_shell: "/usr/sbin/nologin"
+  when: ansible_os_family == "Debian"
+
+- name: Определение к пути nologin shell для RedHat - family (AlmaLinux)
+  set_fact:
+    nologin_shell: "/sbin/nologin"
+  when: ansible_os_family == "RedHat"
+
+- name: Создание системной группы app-runner на Prod
+  group:
+    name: app-runner
+    state: present
+    system: yes
+  when: "'prod' in group_names"
+
+- name: Создание системного пользователя app-runner на Prod (без SSH, nologin)
+  user: 
+    name: app-runner
+    group: app-runner
+    shell: "{{ nologin_shell }}"
+    system: yes
+    create_home: no
+  when: "'prod' in group_names"
+
+- name: Создание системной группы prometheus на Monitor
+  group:
+    name: prometheus
+    state: present
+    system: yes
+  when: "'monitoring' in group_names"
+
+- name: Создание системного пользователя prometheus на Monitor (без SSH, nologin)
+  user: 
+    name: prometheus
+    group: prometheus
+    shell: "{{ nologin_shell }}"
+    system: yes
+    create_home: no
+  when: "'monitoring' in group_names"
