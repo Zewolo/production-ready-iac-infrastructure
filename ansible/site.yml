@@ -1,0 +1,5 @@
+- name: Первоначальная настройка всей инфраструктуры
+  hosts: all
+  become: yes
+  roles:
+    - common

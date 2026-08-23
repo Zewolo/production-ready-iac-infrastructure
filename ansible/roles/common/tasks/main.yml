@@ -1,0 +1,16 @@
+- name: Обновление кэша и системных пакетов для Debian-family
+  apt:
+    update_cache: yes
+    upgrade: dist
+  when: ansible_os_family == "Debian"
+
+- name: Обновление кэша и системных пакетов для RedHat-family (AlmaLinux)
+  dnf:
+    name: "*"
+    state: latest
+  when: ansible_os_family == "RedHat"
+
+- name: Установка единого часового пояса
+  timezone:
+    name: Asia/Yakutsk
+     
