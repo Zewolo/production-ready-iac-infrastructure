@@ -13,4 +13,10 @@
 - name: Установка единого часового пояса
   timezone:
     name: Asia/Yakutsk
-     
+
+- name: Настройка безпарольного sudo для appuser
+  copy:
+    content: "appuser ALL=(ALL) NOPASSWD:ALL"
+    dest: /etc/sudoers.d/appuser
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s     
