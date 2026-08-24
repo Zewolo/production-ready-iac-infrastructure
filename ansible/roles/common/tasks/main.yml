@@ -1,3 +1,30 @@
+- name: Создание системной группы ansible
+  group:
+    name: ansible
+    state: present
+    system: yes
+
+- name: Создание технического пользователя ansible на целевых хостах
+  user:
+    name: ansible
+    group: ansible
+    shell: /bin/bash
+    system: yes
+    create_home: yes
+
+- name: Автоматический проброс SSH - ключа для пользователя ansible
+  authorized_key:
+    user: ansible
+    state: present
+    key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
+
+- name: Настройка безпарольного sudo для нового пользователя ansible
+  copy:
+    content: "ansible ALL=(ALL) NOPASSWD:ALL"
+    dest: /etc/sudoers.d/ansible
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+
 - name: Обновление кэша и системных пакетов для Debian-family
   apt:
     update_cache: yes
@@ -19,13 +46,6 @@
     path: /etc/hosts
     regexp: '^127\.0\.1\.1'
     line: "127.0.1.1 {{ configured_hostname }}"
-
-- name: Настройка безпарольного sudo для appuser
-  copy:
-    content: "appuser ALL=(ALL) NOPASSWD:ALL"
-    dest: /etc/sudoers.d/appuser
-    mode: '0440'
-    validate: /usr/sbin/visudo -cf %s     
 
 - name: Определение к пути nologin shell для Debian - family
   set_fact:
