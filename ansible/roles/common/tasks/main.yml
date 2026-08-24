@@ -1,37 +1,14 @@
-- name: Создание системной группы ansible
-  group:
-    name: ansible
-    state: present
-    system: yes
+# ==============================================================================
+# 1. СИСТЕМНЫЕ НАСТРОЙКИ И ОБНОВЛЕНИЕ
+# ==============================================================================
 
-- name: Создание технического пользователя ansible на целевых хостах
-  user:
-    name: ansible
-    group: ansible
-    shell: /bin/bash
-    system: yes
-    create_home: yes
-
-- name: Автоматический проброс SSH - ключа для пользователя ansible
-  authorized_key:
-    user: ansible
-    state: present
-    key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
-
-- name: Настройка безпарольного sudo для нового пользователя ansible
-  copy:
-    content: "ansible ALL=(ALL) NOPASSWD:ALL"
-    dest: /etc/sudoers.d/ansible
-    mode: '0440'
-    validate: /usr/sbin/visudo -cf %s
-
-- name: Обновление кэша и системных пакетов для Debian-family
+- name: Обновление кэша и системных пакетов для Debian-family (VM3)
   apt:
     update_cache: yes
     upgrade: dist
   when: ansible_os_family == "Debian"
 
-- name: Обновление кэша и системных пакетов для RedHat-family (AlmaLinux)
+- name: Обновление кэша и системных пакетов для RedHat-family (VM2)
   dnf:
     name: "*"
     state: latest
@@ -41,22 +18,59 @@
   timezone:
     name: Asia/Yakutsk
 
+- name: Установка имени хоста (Enterprise Naming)
+  hostname:
+    name: "{{ configured_hostname }}"
+
 - name: Добавление нового имени хоста в локальный /etc/hosts
   lineinfile:
     path: /etc/hosts
     regexp: '^127\.0\.1\.1'
     line: "127.0.1.1 {{ configured_hostname }}"
 
-- name: Определение к пути nologin shell для Debian - family
+- name: Определение пути к nologin shell для Debian-family
   set_fact:
     nologin_shell: "/usr/sbin/nologin"
   when: ansible_os_family == "Debian"
 
-- name: Определение к пути nologin shell для RedHat - family (AlmaLinux)
+- name: Определение пути к nologin shell для RedHat-family
   set_fact:
     nologin_shell: "/sbin/nologin"
   when: ansible_os_family == "RedHat"
 
+# ==============================================================================
+# 2. УПРАВЛЕНИЕ ДОСТУПОМ (IAM) И СОЗДАНИЕ ПОЛЬЗОВАТЕЛЕЙ 
+# ==============================================================================
+
+# --- Настройка пользователя автоматизации ansible на целевых хостах ---
+- name: Создание системной группы ansible
+  group:
+    name: ansible
+    state: present
+    system: yes
+
+- name: Создание технического пользователя ansible
+  user:
+    name: ansible
+    group: ansible
+    shell: /bin/bash
+    system: yes
+    create_home: yes
+
+- name: Автоматический проброс SSH-ключей для пользователя ansible
+  authorized_key:
+    user: ansible
+    state: present
+    key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
+
+- name: Настройка беспарольного sudo для пользователя ansible
+  copy:
+    content: "ansible ALL=(ALL) NOPASSWD:ALL"
+    dest: /etc/sudoers.d/ansible
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+
+# --- Создание изолированного пользователя приложения на VM2 (prod) ---
 - name: Создание системной группы app-runner на Prod
   group:
     name: app-runner
@@ -65,7 +79,7 @@
   when: "'prod' in group_names"
 
 - name: Создание системного пользователя app-runner на Prod (без SSH, nologin)
-  user: 
+  user:
     name: app-runner
     group: app-runner
     shell: "{{ nologin_shell }}"
@@ -73,6 +87,7 @@
     create_home: no
   when: "'prod' in group_names"
 
+# --- Создание изолированного пользователя prometheus на VM3 (monitoring) ---
 - name: Создание системной группы prometheus на Monitor
   group:
     name: prometheus
@@ -81,10 +96,59 @@
   when: "'monitoring' in group_names"
 
 - name: Создание системного пользователя prometheus на Monitor (без SSH, nologin)
-  user: 
+  user:
     name: prometheus
     group: prometheus
     shell: "{{ nologin_shell }}"
     system: yes
     create_home: no
   when: "'monitoring' in group_names"
+
+# ==============================================================================
+# 3. СЕТЕВАЯ БЕЗОПАСНОСТЬ И SSH-HARDENING
+# ==============================================================================
+
+- name: Ограничение SSH-доступа только для пользователя ansible
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^AllowUsers'
+    line: 'AllowUsers ansible'
+  notify: Перезапустить SSH
+
+- name: Настройка брандмауэра UFW (Debian - VM3)
+  block:
+    - name: Установка UFW на Debian
+      apt:
+        name: ufw
+        state: present
+
+    - name: Разрешить SSH на VM3 только с IP-адреса VM1 
+      ufw:
+        rule: allow
+        src: "{{ control_node_ip }}"
+        port: "{{ ansible_port }}"
+        proto: tcp
+
+    - name: Включить UFW и установить политику по умолчанию "deny"
+      ufw:
+        state: enabled
+        direction: incoming
+        policy: deny
+  when: ansible_os_family == "Debian"
+
+- name: Настройка брандмауэра Firewalld (AlmaLinux - VM2) 
+  block:
+    - name: Разрешить SSH на VM2 только с IP-адреса VM1 (AlmaLinux rich-rule) 
+      firewalld:
+        rich_rule: 'rule family="ipv4" source address="{{ control_node_ip }}" port port="{{ ansible_port }}" protocol="tcp" accept'
+        state: enabled
+        permanent: yes
+        immediate: yes
+
+    - name: Удалить дефолтный открытый SSH-сервис в Firewalld
+      firewalld:
+        service: ssh
+        state: disabled
+        permanent: yes
+        immediate: yes
+  when: ansible_os_family == "RedHat"
