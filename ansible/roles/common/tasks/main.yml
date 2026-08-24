@@ -3,68 +3,70 @@
 # ==============================================================================
 
 - name: Обновление кэша и системных пакетов для Debian-family (VM3)
-  apt:
+  ansible.builtin.apt:
     update_cache: yes
     upgrade: dist
   when: ansible_os_family == "Debian"
 
 - name: Обновление кэша и системных пакетов для RedHat-family (VM2)
-  dnf:
+  ansible.builtin.dnf:
     name: "*"
     state: latest
   when: ansible_os_family == "RedHat"
 
 - name: Установка единого часового пояса
-  timezone:
+  community.general.timezone:
     name: Asia/Yakutsk
 
 - name: Установка имени хоста (Enterprise Naming)
-  hostname:
+  ansible.builtin.hostname:
     name: "{{ configured_hostname }}"
 
 - name: Добавление нового имени хоста в локальный /etc/hosts
-  lineinfile:
+  ansible.builtin.lineinfile:
     path: /etc/hosts
     regexp: '^127\.0\.1\.1'
     line: "127.0.1.1 {{ configured_hostname }}"
+    state: present
 
 - name: Определение пути к nologin shell для Debian-family
-  set_fact:
+  ansible.builtin.set_fact:
     nologin_shell: "/usr/sbin/nologin"
   when: ansible_os_family == "Debian"
 
 - name: Определение пути к nologin shell для RedHat-family
-  set_fact:
+  ansible.builtin.set_fact:
     nologin_shell: "/sbin/nologin"
   when: ansible_os_family == "RedHat"
 
 # ==============================================================================
-# 2. УПРАВЛЕНИЕ ДОСТУПОМ (IAM) И СОЗДАНИЕ ПОЛЬЗОВАТЕЛЕЙ 
+# 2. УПРАВЛЕНИЕ ДОСТУПОМ (IAM) И СОЗДАНИЕ ПОЛЬЗОВАТЕЛЕЙ
 # ==============================================================================
 
 # --- Настройка пользователя автоматизации ansible на целевых хостах ---
 - name: Создание системной группы ansible
-  group:
+  ansible.builtin.group:
     name: ansible
     state: present
     system: yes
 
 - name: Создание технического пользователя ansible
-  user:
+  ansible.builtin.user:
     name: ansible
     group: ansible
     shell: /bin/bash
+    state: present
     system: yes
     create_home: yes
 
 - name: Автоматический проброс SSH-ключей для пользователя ansible
-  authorized_key:
+  ansible.posix.authorized_key:
     user: ansible
     state: present
     key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
 
 - name: Настройка беспарольного sudo для пользователя ansible
-  copy:
+  ansible.builtin.copy:
     content: "ansible ALL=(ALL) NOPASSWD:ALL"
     dest: /etc/sudoers.d/ansible
     mode: '0440'
@@ -72,34 +74,36 @@
 
 # --- Создание изолированного пользователя приложения на VM2 (prod) ---
 - name: Создание системной группы app-runner на Prod
-  group:
+  ansible.builtin.group:
     name: app-runner
     state: present
     system: yes
   when: "'prod' in group_names"
 
 - name: Создание системного пользователя app-runner на Prod (без SSH, nologin)
-  user:
+  ansible.builtin.user:
     name: app-runner
     group: app-runner
     shell: "{{ nologin_shell }}"
+    state: present
     system: yes
     create_home: no
   when: "'prod' in group_names"
 
 # --- Создание изолированного пользователя prometheus на VM3 (monitoring) ---
 - name: Создание системной группы prometheus на Monitor
-  group:
+  ansible.builtin.group:
     name: prometheus
     state: present
     system: yes
   when: "'monitoring' in group_names"
 
 - name: Создание системного пользователя prometheus на Monitor (без SSH, nologin)
-  user:
+  ansible.builtin.user:
     name: prometheus
     group: prometheus
     shell: "{{ nologin_shell }}"
+    state: present
     system: yes
     create_home: no
   when: "'monitoring' in group_names"
@@ -109,44 +113,45 @@
 # ==============================================================================
 
 - name: Ограничение SSH-доступа только для пользователя ansible
-  lineinfile:
+  ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^AllowUsers'
     line: 'AllowUsers ansible'
+    state: present
   notify: Перезапустить SSH
 
 - name: Настройка брандмауэра UFW (Debian - VM3)
   block:
     - name: Установка UFW на Debian
-      apt:
+      ansible.builtin.apt:
         name: ufw
         state: present
 
-    - name: Разрешить SSH на VM3 только с IP-адреса VM1 
-      ufw:
+    - name: Разрешить SSH на VM3 только с IP-адреса VM1
+      community.general.ufw:
         rule: allow
         src: "{{ control_node_ip }}"
         port: "{{ ansible_port }}"
         proto: tcp
 
     - name: Включить UFW и установить политику по умолчанию "deny"
-      ufw:
+      community.general.ufw:
         state: enabled
         direction: incoming
         policy: deny
   when: ansible_os_family == "Debian"
 
-- name: Настройка брандмауэра Firewalld (AlmaLinux - VM2) 
+- name: Настройка брандмауэра Firewalld (AlmaLinux - VM2)
   block:
-    - name: Разрешить SSH на VM2 только с IP-адреса VM1 (AlmaLinux rich-rule) 
-      firewalld:
+    - name: Разрешить SSH на VM2 только с IP-адреса VM1 (AlmaLinux rich-rule)
+      ansible.posix.firewalld:
         rich_rule: 'rule family="ipv4" source address="{{ control_node_ip }}" port port="{{ ansible_port }}" protocol="tcp" accept'
         state: enabled
         permanent: yes
         immediate: yes
 
     - name: Удалить дефолтный открытый SSH-сервис в Firewalld
-      firewalld:
+      ansible.posix.firewalld:
         service: ssh
         state: disabled
         permanent: yes
