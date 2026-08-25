@@ -24,3 +24,5 @@ output-debian/
 
 # Игнорируем файлы с переменными и секретами
 *.pkrvars.hcl
+
+ansible/hosts.ini
